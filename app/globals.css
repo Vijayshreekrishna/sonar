@@ -1,0 +1,106 @@
+@import "tailwindcss";
+
+:root {
+  --graphite: #0a0d0e;
+  --panel: #12181a;
+  --panel-raised: #182022;
+  --line: rgba(228, 233, 234, 0.08);
+  --line-strong: rgba(228, 233, 234, 0.18);
+  --signal: #e4e9ea;
+  --signal-dim: #7a8788;
+  --amber: #ffb000;
+  --amber-dim: rgba(255, 176, 0, 0.12);
+  --cool: #5eb1ff;
+  --cool-dim: rgba(94, 177, 255, 0.12);
+  --danger: #ff5d5d;
+  --danger-dim: rgba(255, 93, 93, 0.12);
+}
+
+@theme inline {
+  --color-graphite: var(--graphite);
+  --color-panel: var(--panel);
+  --color-panel-raised: var(--panel-raised);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-signal: var(--signal);
+  --color-signal-dim: var(--signal-dim);
+  --color-amber: var(--amber);
+  --color-amber-dim: var(--amber-dim);
+  --color-cool: var(--cool);
+  --color-cool-dim: var(--cool-dim);
+  --color-danger: var(--danger);
+  --color-danger-dim: var(--danger-dim);
+  --font-display: var(--font-space-grotesk);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--graphite);
+  color: var(--signal);
+  background-image: radial-gradient(circle at 50% 0%, rgba(255, 176, 0, 0.05), transparent 60%);
+}
+
+/* Signature element: a radar sweep, used once in the idle/empty search state. A
+   conic wedge rotates over a dotted grid — literally "scanning" for markets and
+   wallets, which is what this app does. Nowhere else in the UI moves like this. */
+@keyframes radar-sweep {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.radar-sweep {
+  animation: radar-sweep 4s linear infinite;
+}
+
+@keyframes blip {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.radar-blip {
+  animation: blip 2.4s ease-in-out infinite;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-up {
+  animation: fade-up 350ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radar-sweep,
+  .radar-blip,
+  .fade-up {
+    animation: none !important;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 8px;
+}
