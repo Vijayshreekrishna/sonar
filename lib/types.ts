@@ -106,3 +106,28 @@ export type LeaderboardEntry = {
   market_count: number;
   last_seen: string;
 };
+
+export type PriceLevel = {
+  price: string;
+  size: string;
+};
+
+export type OrderbookSnapshot = {
+  market_id: string;
+  token: string;
+  timestamp: string;
+  bids: PriceLevel[];
+  asks: PriceLevel[];
+  best_bid: string;
+  best_ask: string;
+};
+
+export type TradeRow = {
+  trade_id: string;
+  market_id: string;
+  price: number;
+  size: number;
+  side: string;
+  token: string;
+  timestamp: number;
+};

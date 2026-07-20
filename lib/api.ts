@@ -3,6 +3,8 @@ import type {
   LeaderboardEntry,
   MarketsPage,
   MarketSummary,
+  OrderbookSnapshot,
+  TradeRow,
   WalletActivityRow,
   WalletMarketRow,
   WalletOpenPosition,
@@ -103,6 +105,14 @@ export function getCategoryMarkets(
 
 export function getMarket(apiKey: string, id: string) {
   return req<MarketSummary & Record<string, unknown>>(`/v1/markets/${id}`, apiKey);
+}
+
+export function getOrderbook(apiKey: string, id: string) {
+  return req<OrderbookSnapshot>(`/v1/markets/${id}/orderbook`, apiKey);
+}
+
+export function getMarketTrades(apiKey: string, id: string, limit = 50) {
+  return req<TradeRow[]>(`/v1/markets/${id}/trades?limit=${limit}`, apiKey);
 }
 
 // --- Wallets ---

@@ -2,6 +2,7 @@
 
 import { useMarket } from "@/lib/useMarket";
 import { formatPrice, formatUsd } from "@/lib/format";
+import { MarketOrderbook } from "./MarketOrderbook";
 
 export function MarketDetail({
   apiKey,
@@ -82,6 +83,8 @@ export function MarketDetail({
                 </div>
               </div>
             )}
+
+            <MarketOrderbook apiKey={apiKey} marketId={marketId} />
           </div>
         )}
       </div>
