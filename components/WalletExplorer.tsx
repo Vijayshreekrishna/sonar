@@ -16,6 +16,7 @@ import type {
   WalletSummary,
 } from "@/lib/types";
 import { formatUsd, timeAgo, truncateAddr } from "@/lib/format";
+import { WalletLeaderboard } from "./WalletLeaderboard";
 
 type Profile = {
   address: string;
@@ -38,10 +39,10 @@ export function WalletExplorer({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    const address = input.trim().toLowerCase();
+  async function lookup(rawAddress: string) {
+    const address = rawAddress.trim().toLowerCase();
     if (!address) return;
+    setInput(address);
     setLoading(true);
     setError(null);
     setProfile(null);
@@ -68,6 +69,11 @@ export function WalletExplorer({
     }
   }
 
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    lookup(input);
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <form onSubmit={handleSubmit} className="flex gap-2">
@@ -88,14 +94,20 @@ export function WalletExplorer({
 
       {error && <p className="text-xs text-danger">{error}</p>}
 
-      {!profile && !loading && !error && (
-        <p className="text-xs text-signal-dim text-center py-12">
-          Paste any wallet address to see its trading history, PnL, and open positions.
-        </p>
+      {loading && !profile && <p className="text-xs text-signal-dim text-center py-6">Scanning…</p>}
+
+      {!profile && !loading && (
+        <WalletLeaderboard apiKey={apiKey} onSelectWallet={lookup} />
       )}
 
       {profile && (
         <div className="flex flex-col gap-4 fade-up">
+          <button
+            onClick={() => setProfile(null)}
+            className="self-start text-xs text-signal-dim hover:text-signal transition-colors"
+          >
+            ← back to leaderboard
+          </button>
           <div className="rounded-lg border border-line bg-panel px-4 py-3.5">
             <span className="font-mono text-sm text-signal">{truncateAddr(profile.address, 6)}</span>
             {profile.summary && (
@@ -141,9 +153,9 @@ export function WalletExplorer({
 
           {profile.activity && profile.activity.length > 0 && (
             <Section title="Recent activity">
-              {profile.activity.map((a) => (
+              {profile.activity.map((a, i) => (
                 <button
-                  key={a.tx_hash}
+                  key={`${a.tx_hash}-${a.side}-${i}`}
                   onClick={() => onSelectMarket(a.market_id)}
                   className="w-full px-4 py-2.5 text-xs flex items-center justify-between gap-2 text-left hover:bg-panel-raised transition-colors"
                 >

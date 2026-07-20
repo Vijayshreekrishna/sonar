@@ -1,5 +1,6 @@
 import type {
   Category,
+  LeaderboardEntry,
   MarketsPage,
   MarketSummary,
   WalletActivityRow,
@@ -11,13 +12,32 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_PMAXIS_API_URL ?? "https://api.pmaxis.trade";
 
+// The backend VPS is currently memory/disk constrained and some ClickHouse queries
+// (wallet PnL especially) have been observed taking 15-60s instead of their normal
+// sub-second time under swap pressure - 30s gives those a real chance to finish
+// instead of erroring out on a backend that would've succeeded a few seconds later.
+const REQUEST_TIMEOUT_MS = 30_000;
+
 async function req<T>(path: string, apiKey: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "X-API-Key": apiKey },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      headers: { "X-API-Key": apiKey },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if ((err as Error).name === "AbortError") {
+      throw new Error(`Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s: ${API_BASE}${path}`);
+    }
+    throw new Error(`Network error calling ${API_BASE}${path}: ${(err as Error).message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`${res.status} ${res.statusText}: ${body}`);
+    throw new Error(`${res.status} ${res.statusText} (${API_BASE}${path}): ${body}`);
   }
   return res.json() as Promise<T>;
 }
@@ -54,8 +74,12 @@ export function getTopMarkets(
   return req<MarketSummary[]>(`/v1/markets/top?${params.toString()}`, apiKey);
 }
 
-export function getTrendingMarkets(apiKey: string, limit = 20) {
-  return req<MarketSummary[]>(`/v1/markets/trending?limit=${limit}`, apiKey);
+export async function getTrendingMarkets(apiKey: string, limit = 20) {
+  const res = await req<{ data: MarketSummary[]; count: number }>(
+    `/v1/markets/trending?limit=${limit}`,
+    apiKey
+  );
+  return res.data;
 }
 
 export function getCategories(apiKey: string) {
@@ -82,6 +106,26 @@ export function getMarket(apiKey: string, id: string) {
 }
 
 // --- Wallets ---
+
+export function getLeaderboard(
+  apiKey: string,
+  opts: {
+    window?: "24h" | "7d" | "30d" | "all";
+    category?: string;
+    sort?: "volume" | "recent";
+    limit?: number;
+  } = {}
+) {
+  const params = new URLSearchParams();
+  params.set("window", opts.window ?? "7d");
+  if (opts.category) params.set("category", opts.category);
+  params.set("sort", opts.sort ?? "volume");
+  params.set("limit", String(opts.limit ?? 25));
+  return req<{ window: string; category: string; sort: string; data: LeaderboardEntry[]; count: number }>(
+    `/v1/leaderboard?${params.toString()}`,
+    apiKey
+  ).then((res) => res.data);
+}
 
 export function getWalletSummary(apiKey: string, address: string) {
   return req<WalletSummary>(`/v1/wallets/${address}/summary`, apiKey);

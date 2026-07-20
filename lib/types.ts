@@ -95,3 +95,14 @@ export type WalletOpenPosition = {
   sold: number;
   net_position: number;
 };
+
+export type LeaderboardEntry = {
+  rank: number;
+  wallet: string;
+  total_trades: number;
+  total_volume: number;
+  buy_volume: number;
+  sell_volume: number;
+  market_count: number;
+  last_seen: string;
+};

@@ -55,7 +55,7 @@ export function MarketExplorer({
 
     load()
       .then((markets) => {
-        if (!cancelled) setResult({ key: requestKey, markets, error: null });
+        if (!cancelled) setResult({ key: requestKey, markets: Array.isArray(markets) ? markets : [], error: null });
       })
       .catch((err) => {
         if (!cancelled) setResult({ key: requestKey, markets: [], error: (err as Error).message });
