@@ -3,6 +3,7 @@ import type {
   LeaderboardEntry,
   MarketsPage,
   MarketSummary,
+  OrderbookHistoryPoint,
   OrderbookSnapshot,
   TradeRow,
   WalletActivityRow,
@@ -109,6 +110,13 @@ export function getMarket(apiKey: string, id: string) {
 
 export function getOrderbook(apiKey: string, id: string) {
   return req<OrderbookSnapshot>(`/v1/markets/${id}/orderbook`, apiKey);
+}
+
+export function getOrderbookHistory(apiKey: string, id: string, limit = 100) {
+  return req<{ market_id: string; data: OrderbookHistoryPoint[]; count: number }>(
+    `/v1/markets/${id}/orderbook/history?limit=${limit}`,
+    apiKey
+  ).then((res) => res.data);
 }
 
 export function getMarketTrades(apiKey: string, id: string, limit = 50) {

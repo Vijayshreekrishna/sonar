@@ -131,3 +131,11 @@ export type TradeRow = {
   token: string;
   timestamp: number;
 };
+
+export type OrderbookHistoryPoint = {
+  best_bid: number;
+  best_ask: number;
+  mid_price: number;
+  spread: number;
+  timestamp: number;
+};

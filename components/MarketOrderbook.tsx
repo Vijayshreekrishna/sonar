@@ -5,6 +5,7 @@ import { getMarketTrades, getOrderbook } from "@/lib/api";
 import { useMarketStream } from "@/lib/useMarketStream";
 import type { OrderbookSnapshot, TradeRow } from "@/lib/types";
 import { formatUsd, timeAgo } from "@/lib/format";
+import { OrderbookHistoryChart } from "./OrderbookHistoryChart";
 
 const DEPTH_LEVELS = 8;
 const TRADE_LIMIT = 30;
@@ -151,6 +152,8 @@ export function MarketOrderbook({ apiKey, marketId }: { apiKey: string; marketId
           </div>
         )}
       </div>
+
+      <OrderbookHistoryChart apiKey={apiKey} marketId={marketId} />
     </div>
   );
 }
