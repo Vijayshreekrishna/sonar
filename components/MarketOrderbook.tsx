@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getMarketTrades, getOrderbook } from "@/lib/api";
+import { useMarketStream } from "@/lib/useMarketStream";
 import type { OrderbookSnapshot, TradeRow } from "@/lib/types";
 import { formatUsd, timeAgo } from "@/lib/format";
 
@@ -19,6 +20,8 @@ export function MarketOrderbook({ apiKey, marketId }: { apiKey: string; marketId
     rows: TradeRow[];
     error: string | null;
   } | null>(null);
+
+  const { orderbook: liveBook, liveTrades, connected } = useMarketStream(apiKey, marketId);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,25 +48,48 @@ export function MarketOrderbook({ apiKey, marketId }: { apiKey: string; marketId
   }, [apiKey, marketId]);
 
   const book = bookResult?.marketId === marketId ? bookResult : null;
-  const trades = tradesResult?.marketId === marketId ? tradesResult : null;
-  const bids = book?.snap?.bids.slice(0, DEPTH_LEVELS) ?? [];
-  const asks = book?.snap?.asks.slice(0, DEPTH_LEVELS) ?? [];
+  const restTrades = tradesResult?.marketId === marketId ? tradesResult : null;
+
+  // Prefer the live WS snapshot once one arrives; fall back to the initial REST fetch
+  // (covers the gap before the first live update, and quiet markets with no live feed).
+  const activeSnap = liveBook ?? book?.snap ?? null;
+  const bids = activeSnap?.bids.slice(0, DEPTH_LEVELS) ?? [];
+  const asks = activeSnap?.asks.slice(0, DEPTH_LEVELS) ?? [];
+
+  // Live trades arrive newest-first; append the REST history behind them, deduped by
+  // trade_id so a trade that arrives live isn't also shown from the initial snapshot.
+  const seen = new Set<string>();
+  const trades: TradeRow[] = [];
+  for (const t of [...liveTrades, ...(restTrades?.rows ?? [])]) {
+    if (seen.has(t.trade_id)) continue;
+    seen.add(t.trade_id);
+    trades.push(t);
+    if (trades.length >= TRADE_LIMIT) break;
+  }
 
   return (
     <div className="flex flex-col gap-4 border-t border-line pt-4">
       <div>
-        <span className="text-xs uppercase tracking-wider text-signal-dim">Order book</span>
-        {!book && <p className="mt-2 text-xs text-signal-dim">Scanning…</p>}
-        {book && book.snap === null && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs uppercase tracking-wider text-signal-dim">Order book</span>
+          {connected && (
+            <span className="flex items-center gap-1 text-[10px] text-cool">
+              <span className="h-1.5 w-1.5 rounded-full bg-cool" />
+              live
+            </span>
+          )}
+        </div>
+        {!book && !liveBook && <p className="mt-2 text-xs text-signal-dim">Scanning…</p>}
+        {book && book.snap === null && !liveBook && (
           <p className="mt-2 text-xs text-signal-dim">
             No live order book for this market — likely quiet for 2h+ (the snapshot expires) or
             never captured one.
           </p>
         )}
-        {book?.snap && bids.length === 0 && asks.length === 0 && (
+        {activeSnap && bids.length === 0 && asks.length === 0 && (
           <p className="mt-2 text-xs text-signal-dim">Order book snapshot is empty.</p>
         )}
-        {book?.snap && (bids.length > 0 || asks.length > 0) && (
+        {activeSnap && (bids.length > 0 || asks.length > 0) && (
           <div className="mt-2 grid grid-cols-2 gap-3 text-xs font-mono">
             <div>
               <div className="text-cool text-[10px] uppercase tracking-wide mb-1">Bids</div>
@@ -94,14 +120,22 @@ export function MarketOrderbook({ apiKey, marketId }: { apiKey: string; marketId
       </div>
 
       <div>
-        <span className="text-xs uppercase tracking-wider text-signal-dim">Recent trades</span>
-        {!trades && <p className="mt-2 text-xs text-signal-dim">Scanning…</p>}
-        {trades && trades.rows.length === 0 && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs uppercase tracking-wider text-signal-dim">Recent trades</span>
+          {connected && (
+            <span className="flex items-center gap-1 text-[10px] text-cool">
+              <span className="h-1.5 w-1.5 rounded-full bg-cool" />
+              live
+            </span>
+          )}
+        </div>
+        {!restTrades && trades.length === 0 && <p className="mt-2 text-xs text-signal-dim">Scanning…</p>}
+        {restTrades && trades.length === 0 && (
           <p className="mt-2 text-xs text-signal-dim">No recent trades for this market.</p>
         )}
-        {trades && trades.rows.length > 0 && (
+        {trades.length > 0 && (
           <div className="mt-2 divide-y divide-line max-h-56 overflow-y-auto">
-            {trades.rows.map((t) => (
+            {trades.map((t) => (
               <div
                 key={t.trade_id}
                 className="py-1.5 flex items-center justify-between text-xs font-mono"
