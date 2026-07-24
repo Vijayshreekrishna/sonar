@@ -1,14 +1,18 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   getWalletActivity,
   getWalletMarkets,
+  getWalletOnchain,
   getWalletOpenPositions,
   getWalletPnL,
+  getWalletPositions,
   getWalletSummary,
+  getWatchedWallets,
 } from "@/lib/api";
 import type {
+  OnchainTx,
   WalletActivityRow,
   WalletMarketRow,
   WalletOpenPosition,
@@ -17,6 +21,18 @@ import type {
 } from "@/lib/types";
 import { formatUsd, timeAgo, truncateAddr } from "@/lib/format";
 import { WalletLeaderboard } from "./WalletLeaderboard";
+import { WalletSearch } from "./WalletSearch";
+import { WalletClusters } from "./WalletClusters";
+import { WalletCalibration } from "./WalletCalibration";
+import { WalletCluster } from "./WalletCluster";
+import { WalletWatchToggle } from "./WalletWatchToggle";
+
+type SubTab = "leaderboard" | "search" | "clusters";
+const SUB_TABS: { value: SubTab; label: string }[] = [
+  { value: "leaderboard", label: "Leaderboard" },
+  { value: "search", label: "Search" },
+  { value: "clusters", label: "Clusters" },
+];
 
 type Profile = {
   address: string;
@@ -25,6 +41,8 @@ type Profile = {
   markets?: WalletMarketRow[];
   openPositions?: WalletOpenPosition[];
   activity?: WalletActivityRow[];
+  onchain?: OnchainTx[];
+  verifiedPositions?: unknown[];
 };
 
 export function WalletExplorer({
@@ -38,6 +56,25 @@ export function WalletExplorer({
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [watchedSet, setWatchedSet] = useState<Set<string>>(new Set());
+  const [subTab, setSubTab] = useState<SubTab>("leaderboard");
+
+  // Fetched once and shared by the watch toggle and the empty-section hints below, so
+  // neither has to make its own duplicate call to check membership.
+  useEffect(() => {
+    getWatchedWallets(apiKey)
+      .then((res) => setWatchedSet(new Set(res.wallets)))
+      .catch(() => {});
+  }, [apiKey]);
+
+  function setWatching(address: string, watching: boolean) {
+    setWatchedSet((prev) => {
+      const next = new Set(prev);
+      if (watching) next.add(address);
+      else next.delete(address);
+      return next;
+    });
+  }
 
   async function lookup(rawAddress: string) {
     const address = rawAddress.trim().toLowerCase();
@@ -54,6 +91,16 @@ export function WalletExplorer({
         getWalletOpenPositions(apiKey, address),
         getWalletActivity(apiKey, address, 15),
       ]);
+
+      // Best-effort supplementary data: getWalletOnchain can be slow for whale wallets
+      // (unindexed ClickHouse scan) and getWalletPositions proxies a third-party API that
+      // may reject unregistered addresses - neither should blank the whole profile if
+      // the core data above already loaded fine.
+      const [onchainResult, positionsResult] = await Promise.allSettled([
+        getWalletOnchain(apiKey, address, 25),
+        getWalletPositions(apiKey, address),
+      ]);
+
       setProfile({
         address,
         summary,
@@ -61,6 +108,8 @@ export function WalletExplorer({
         markets: markets.data,
         openPositions: openPositions.data,
         activity: activity.data,
+        onchain: onchainResult.status === "fulfilled" ? onchainResult.value : undefined,
+        verifiedPositions: positionsResult.status === "fulfilled" ? positionsResult.value : undefined,
       });
     } catch (err) {
       setError((err as Error).message);
@@ -97,7 +146,25 @@ export function WalletExplorer({
       {loading && !profile && <p className="text-xs text-signal-dim text-center py-6">Scanning…</p>}
 
       {!profile && !loading && (
-        <WalletLeaderboard apiKey={apiKey} onSelectWallet={lookup} />
+        <div className="flex flex-col gap-4">
+          <div className="flex rounded-md border border-line overflow-hidden self-start shrink-0">
+            {SUB_TABS.map((t) => (
+              <button
+                key={t.value}
+                onClick={() => setSubTab(t.value)}
+                className={`px-3 py-1.5 text-xs uppercase tracking-wide transition-colors ${
+                  subTab === t.value ? "bg-amber text-graphite" : "bg-panel text-signal-dim hover:text-signal"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {subTab === "leaderboard" && <WalletLeaderboard apiKey={apiKey} onSelectWallet={lookup} />}
+          {subTab === "search" && <WalletSearch apiKey={apiKey} onSelectWallet={lookup} />}
+          {subTab === "clusters" && <WalletClusters apiKey={apiKey} onSelectWallet={lookup} />}
+        </div>
       )}
 
       {profile && (
@@ -106,10 +173,18 @@ export function WalletExplorer({
             onClick={() => setProfile(null)}
             className="self-start text-xs text-signal-dim hover:text-signal transition-colors"
           >
-            ← back to leaderboard
+            ← back
           </button>
           <div className="rounded-lg border border-line bg-panel px-4 py-3.5">
-            <span className="font-mono text-sm text-signal">{truncateAddr(profile.address, 6)}</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono text-sm text-signal">{truncateAddr(profile.address, 6)}</span>
+              <WalletWatchToggle
+                apiKey={apiKey}
+                address={profile.address}
+                watching={watchedSet.has(profile.address)}
+                onChange={(w) => setWatching(profile.address, w)}
+              />
+            </div>
             {profile.summary && (
               <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                 <Stat label="Trades" value={String(profile.summary.total_trades)} />
@@ -119,6 +194,25 @@ export function WalletExplorer({
               </div>
             )}
           </div>
+
+          {!watchedSet.has(profile.address) &&
+            (profile.openPositions?.length ?? 0) === 0 &&
+            (profile.activity?.length ?? 0) === 0 &&
+            (profile.markets?.length ?? 0) === 0 && (
+              <div className="rounded-lg border border-amber/30 bg-amber-dim px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+                <p className="text-[11px] text-amber">
+                  No activity, markets, or open positions found — this wallet isn&apos;t
+                  watched yet, so its trading history may not be indexed even if it&apos;s
+                  actively trading. Watch it to start tracking going forward.
+                </p>
+                <WalletWatchToggle
+                  apiKey={apiKey}
+                  address={profile.address}
+                  watching={false}
+                  onChange={(w) => setWatching(profile.address, w)}
+                />
+              </div>
+            )}
 
           {profile.pnl && (
             <div className="rounded-lg border border-line bg-panel px-4 py-3.5">
@@ -135,6 +229,9 @@ export function WalletExplorer({
               {profile.pnl.note && <p className="mt-2 text-[11px] text-signal-dim">{profile.pnl.note}</p>}
             </div>
           )}
+
+          <WalletCalibration apiKey={apiKey} address={profile.address} />
+          <WalletCluster apiKey={apiKey} address={profile.address} onSelectWallet={lookup} />
 
           {profile.openPositions && profile.openPositions.length > 0 && (
             <Section title="Open positions">
@@ -187,6 +284,41 @@ export function WalletExplorer({
                 </button>
               ))}
             </Section>
+          )}
+
+          {profile.onchain && profile.onchain.length > 0 && (
+            <Section title="On-chain history">
+              {profile.onchain.map((tx, i) => (
+                <div key={`${tx.tx_hash}-${i}`} className="px-4 py-2.5 text-xs flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={tx.side === "buy" ? "text-cool" : "text-danger"}>
+                      {tx.side?.toUpperCase()}
+                    </span>
+                    <span className="text-signal-dim font-mono truncate">{truncateAddr(tx.tx_hash, 6)}</span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="font-mono text-signal">{formatUsd(Number(tx.amount) / 1_000_000)}</span>
+                    <span className="text-signal-dim">{timeAgo(tx.timestamp)}</span>
+                  </div>
+                </div>
+              ))}
+            </Section>
+          )}
+
+          {profile.verifiedPositions && (
+            <div className="rounded-lg border border-line bg-panel px-4 py-3.5">
+              <h3 className="text-xs uppercase tracking-wide text-signal-dim mb-1">
+                Verified positions
+              </h3>
+              <p className="text-[11px] text-signal-dim mb-2">
+                Proxied directly from Polymarket&apos;s Data API — exact, not the
+                activity-derived approximation above. Empty if this address isn&apos;t a
+                registered Polymarket proxy wallet.
+              </p>
+              <p className="text-xs font-mono text-signal">
+                {profile.verifiedPositions.length} position{profile.verifiedPositions.length === 1 ? "" : "s"}
+              </p>
+            </div>
           )}
         </div>
       )}

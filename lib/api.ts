@@ -1,16 +1,23 @@
 import type {
   Category,
+  ClustersPage,
   LeaderboardEntry,
   MarketsPage,
   MarketSummary,
+  OnchainTx,
   OrderbookHistoryPoint,
   OrderbookSnapshot,
   TradeRow,
   WalletActivityRow,
+  WalletCalibration,
+  WalletCluster,
   WalletMarketRow,
   WalletOpenPosition,
   WalletPnL,
+  WalletsPage,
   WalletSummary,
+  WatchedWallets,
+  WatchStatus,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_PMAXIS_API_URL ?? "https://api.pmaxis.trade";
@@ -172,4 +179,129 @@ export function getWalletOpenPositions(apiKey: string, address: string) {
     `/v1/wallets/${address}/positions/open`,
     apiKey
   );
+}
+
+// Search/browse wallets by volume, trade count, category, and activity recency - unlike
+// getLeaderboard (a flat top-N list), this is filterable and cursor-paginated. Returns the
+// page directly (not unwrapped) so callers can drive "load more" off next_cursor/has_more.
+//
+// Note: `category` filters to "traded in this category at some point" - it does NOT
+// rescope total_volume/total_trades to just that category, unlike getLeaderboard's
+// `category` param, which does rescope. Different semantics, easy to conflate.
+export function searchWallets(
+  apiKey: string,
+  opts: {
+    minVolume?: number;
+    maxVolume?: number;
+    minTrades?: number;
+    maxTrades?: number;
+    category?: string;
+    active?: "24h" | "7d" | "30d" | "all";
+    sort?: "volume" | "trades" | "recent";
+    limit?: number;
+    cursor?: string;
+  } = {}
+) {
+  const params = new URLSearchParams();
+  if (opts.minVolume != null) params.set("min_volume", String(opts.minVolume));
+  if (opts.maxVolume != null) params.set("max_volume", String(opts.maxVolume));
+  if (opts.minTrades != null) params.set("min_trades", String(opts.minTrades));
+  if (opts.maxTrades != null) params.set("max_trades", String(opts.maxTrades));
+  if (opts.category) params.set("category", opts.category);
+  params.set("active", opts.active ?? "all");
+  params.set("sort", opts.sort ?? "volume");
+  params.set("limit", String(opts.limit ?? 50));
+  if (opts.cursor) params.set("cursor", opts.cursor);
+  return req<WalletsPage>(`/v1/wallets?${params.toString()}`, apiKey);
+}
+
+export function getWalletOnchain(apiKey: string, address: string, limit = 50) {
+  return req<OnchainTx[]>(`/v1/wallets/${address}/onchain?limit=${limit}`, apiKey);
+}
+
+// Two DELIBERATELY separate signals - resolved.brier_score (a real, proven track record)
+// vs open (unrealized edge on still-open positions, explicitly NOT calibration). Never
+// merge these into one score in the UI.
+export function getWalletCalibration(apiKey: string, address: string, limit = 200) {
+  return req<WalletCalibration>(`/v1/wallets/${address}/calibration?limit=${limit}`, apiKey);
+}
+
+// Platform-wide funding-source clusters (Sybil/multi-account signal, Tier 2). Named
+// `listClusters` (not `getWalletClusters`) to stay visually distinct from the singular,
+// address-scoped `getWalletCluster` below. No historical backfill - only wallets funded
+// since 2026-07-23 can appear.
+export function listClusters(apiKey: string, opts: { limit?: number; cursor?: string } = {}) {
+  const params = new URLSearchParams();
+  params.set("limit", String(opts.limit ?? 20));
+  if (opts.cursor) params.set("cursor", opts.cursor);
+  return req<ClustersPage>(`/v1/wallets/clusters?${params.toString()}`, apiKey);
+}
+
+// One wallet's funding-source cluster (Tier 2, hard on-chain fact) plus its behavioral
+// lockstep-trading cluster (Tier 1, a noisier heuristic) - never conflate the two.
+export function getWalletCluster(apiKey: string, address: string) {
+  return req<WalletCluster>(`/v1/wallets/${address}/cluster`, apiKey);
+}
+
+// Proxies Polymarket's own Data API - response shape isn't controlled by PMAxis, so this
+// is intentionally left as unknown[] rather than inventing a type contract for it (same
+// precedent as WalletPnL.data before it was typed from PMAxis's own computeWalletPnL).
+export function getWalletPositions(apiKey: string, address: string) {
+  return req<unknown[]>(`/v1/positions?wallet=${address}`, apiKey);
+}
+
+export function getWalletClosedPositions(apiKey: string, address: string) {
+  return req<unknown[]>(`/v1/positions/closed?wallet=${address}`, apiKey);
+}
+
+// --- Wallet watching ---
+// wallet_activity/wallet_market_activity (feeding getWalletActivity/getWalletMarkets/
+// getWalletOpenPositions above) are gated by a Redis watched:wallets set - an unwatched
+// wallet can show empty activity/markets/positions even if it trades heavily, until
+// someone watches it.
+
+async function reqMutate<T>(
+  path: string,
+  apiKey: string,
+  method: "POST" | "DELETE",
+  body?: unknown
+): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: {
+        "X-API-Key": apiKey,
+        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if ((err as Error).name === "AbortError") {
+      throw new Error(`Request timed out after ${REQUEST_TIMEOUT_MS / 1000}s: ${API_BASE}${path}`);
+    }
+    throw new Error(`Network error calling ${API_BASE}${path}: ${(err as Error).message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (!res.ok) {
+    const responseBody = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${res.statusText} (${API_BASE}${path}): ${responseBody}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export function watchWallet(apiKey: string, address: string) {
+  return reqMutate<WatchStatus>("/v1/wallets/watch", apiKey, "POST", { address });
+}
+
+export function unwatchWallet(apiKey: string, address: string) {
+  return reqMutate<WatchStatus>(`/v1/wallets/${address}/watch`, apiKey, "DELETE");
+}
+
+export function getWatchedWallets(apiKey: string) {
+  return req<WatchedWallets>("/v1/wallets/watched", apiKey);
 }
